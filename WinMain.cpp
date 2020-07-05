@@ -14,18 +14,12 @@
 #pragma comment(lib, "Comctl32.lib")
 
 //-----------------------------------------------------------------------------
-// Local defines
-
-#define INITIAL_FILEINFO_BUFFER_SIZE 0x10000
-
-//-----------------------------------------------------------------------------
 // Global variables
 
 TContextMenu g_ContextMenus[MAX_CONTEXT_MENUS];
-HINSTANCE g_hInst;
 TToolTip g_Tooltip;
-HANDLE g_hHeap;
 DWORD g_dwWinVer;
+DWORD g_dwWinBuild;
 TCHAR g_szInitialDirectory[MAX_PATH];
 DWORD g_dwMenuCount = 0;
 
@@ -64,7 +58,7 @@ static void SetTokenObjectIntegrityLevel(DWORD dwIntegrityLevel)
         if(GetLastError() == ERROR_NO_TOKEN)
             OpenProcessToken(GetCurrentProcess(), WRITE_OWNER, &hToken);
     }
-    
+
     // If succeeded, set the integrity level
     if(hToken != NULL)
     {
@@ -131,9 +125,8 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
     bool bAsynchronousOpen = false;
     int nFileNameIndex = 0;
 
-    // Save the instance
-    g_hInst = hInstance;
-    g_hHeap = GetProcessHeap();
+    // Initialize the instance
+    InitInstance(hInstance);
     InitCommonControls();
 
     // Get the Windows version
@@ -173,7 +166,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
             // Check for default read+write access
             if(!_tcsnicmp(szArg, _T("DesiredAccess:"), 14))
                 Text2Hex32(szArg+14, &dwDesiredAccess);
-            
+
             // Check for default share read+write
             if(!_tcsnicmp(szArg, _T("ShareAccess:"), 12))
                 Text2Hex32(szArg+12, &dwShareAccess);
@@ -219,14 +212,14 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
     // to lowest possible value. This will allow us to open our token even if the user
     // lowers the integrity level.
     //
-    
+
     SetTokenObjectIntegrityLevel(SECURITY_MANDATORY_UNTRUSTED_RID);
 
     //
     // Save the application initial directory
     //
 
-    GetCurrentDirectory(_maxchars(g_szInitialDirectory), g_szInitialDirectory);
+    GetCurrentDirectory(_countof(g_szInitialDirectory), g_szInitialDirectory);
 
     //
     // Register the data editor window
@@ -244,10 +237,6 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
     memset(g_ContextMenus, 0, sizeof(g_ContextMenus));
     EnumResourceNames(g_hInst, RT_MENU, EnumMenusProc, NULL);
 
-    // Allocate default size for the FileInfo.
-    pData->pbNtInfoBuff = (LPBYTE)HeapAlloc(g_hHeap, HEAP_ZERO_MEMORY, INITIAL_FILEINFO_BUFFER_SIZE);
-    pData->cbNtInfoBuff = INITIAL_FILEINFO_BUFFER_SIZE;
-
     // Set default values for opening relative file by NtOpenFile
     pData->dwDesiredAccessRF     = FILE_READ_DATA;
     pData->dwOpenOptionsRF       = 0;
@@ -257,7 +246,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
     pData->dwCreateDisposition1  = OPEN_ALWAYS;
     pData->dwCreateDisposition2  = FILE_OPEN_IF;
     pData->dwDesiredAccess       = dwDesiredAccess;
-    pData->dwFileAttributes      = FILE_ATTRIBUTE_NORMAL;
+    pData->dwFlagsAndAttributes  = FILE_ATTRIBUTE_NORMAL;
     pData->dwShareAccess         = dwShareAccess;
     pData->dwCreateOptions       = dwCreateOptions;
     pData->dwObjAttrFlags        = OBJ_CASE_INSENSITIVE;
@@ -280,19 +269,21 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR, int)
     pData->dwSectWin32Protect    = PAGE_READONLY;
 
 #ifdef _DEBUG
-    DebugCode_TEST();    
+    DebugCode_TEST();
 #endif
 
     // Call the dialog
     FileTestDialog(NULL, pData);
 
+    // Free the data blobs
+    pData->NtInfoData.Free();
+    pData->RdWrData.Free();
+    pData->OutData.Free();
+    pData->InData.Free();
+
     // Cleanup the TFileTestData structure and exit
     if(pData->pFileEa != NULL)
         delete [] pData->pFileEa;
-    if(pData->pbFileData != NULL)
-        VirtualFree(pData->pbFileData, pData->cbFileDataMax, MEM_RELEASE);
-    if(pData->pbNtInfoBuff != NULL)
-        HeapFree(g_hHeap, 0, pData->pbNtInfoBuff);
     HeapFree(g_hHeap, 0, pData);
 
     UnloadDynamicLoadedAPIs();

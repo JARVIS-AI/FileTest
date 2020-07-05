@@ -196,14 +196,14 @@ static int SaveDialog(HWND hDlg)
     HWND hCombo = GetDlgItem(hDlg, IDC_CREATE_DISPOSITION);
     int nError;
 
-    GetDlgItemText(hDlg, IDC_DIRECTORY_NAME, pData->szDirName, _maxchars(pData->szDirName));
-    GetDlgItemText(hDlg, IDC_FILE_NAME, pData->szFileName1, _maxchars(pData->szFileName1));
+    GetDlgItemText(hDlg, IDC_DIRECTORY_NAME, pData->szDirName, _countof(pData->szDirName));
+    GetDlgItemText(hDlg, IDC_FILE_NAME, pData->szFileName1, _countof(pData->szFileName1));
 
     if((nError = DlgText2Hex32(hDlg, IDC_OBJ_ATTR_FLAGS, &pData->dwObjAttrFlags)) != ERROR_SUCCESS)
         return nError;
     if((nError = DlgText2Hex32(hDlg, IDC_DESIRED_ACCESS, &pData->dwDesiredAccess)) != ERROR_SUCCESS)
         return nError;
-    if((nError = DlgText2Hex32(hDlg, IDC_FILE_ATTRIBUTES, &pData->dwFileAttributes)) != ERROR_SUCCESS)
+    if((nError = DlgText2Hex32(hDlg, IDC_FILE_ATTRIBUTES, &pData->dwFlagsAndAttributes)) != ERROR_SUCCESS)
         return nError;
     if((nError = DlgText2Hex32(hDlg, IDC_SHARE_ACCESS, &pData->dwShareAccess)) != ERROR_SUCCESS)
         return nError;
@@ -265,12 +265,12 @@ static int OnInitDialog(HWND hDlg, LPARAM lParam)
         pAnchors->AddAnchor(hDlg, IDC_CREATE_FILE, akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_CLOSE_HANDLE, akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_RESULT_FRAME, akLeft | akRight | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_RESULT_STATUS_TITLE, akLeft | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_RESULT_STATUS, akLeft | akRight | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE_TITLE, akLeft | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE, akLeft | akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_HANDLE_TITLE, akLeft | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_HANDLE, akLeft | akRight | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_NTCREATE_RESULT_TITLE, akLeft | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_NTCREATE_RESULT, akLeft | akRight | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_INFORMATION_TITLE, akLeft | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_INFORMATION, akLeft | akRight | akBottom);
     }
 
     // Initialize the "Relative File" hyperlink
@@ -315,12 +315,12 @@ static int OnSetActive(HWND hDlg)
     Hex2DlgText32(hDlg, IDC_OBJ_ATTR_FLAGS, pData->dwObjAttrFlags);
     Hex2DlgText32(hDlg, IDC_DESIRED_ACCESS, pData->dwDesiredAccess);
     Hex2DlgText64(hDlg, IDC_ALLOCATION_SIZE, pData->AllocationSize);
-    Hex2DlgText32(hDlg, IDC_FILE_ATTRIBUTES, pData->dwFileAttributes);
+    Hex2DlgText32(hDlg, IDC_FILE_ATTRIBUTES, pData->dwFlagsAndAttributes);
     Hex2DlgText32(hDlg, IDC_SHARE_ACCESS, pData->dwShareAccess);
     Hex2DlgText32(hDlg, IDC_CREATE_OPTIONS, pData->dwCreateOptions);
 
     // Update the info about extended attributes
-    rsprintf(szEaInfo, _maxchars(szEaInfo), IDS_EA_INFO, pData->pFileEa, pData->dwEaSize);
+    rsprintf(szEaInfo, _countof(szEaInfo), IDS_EA_INFO, pData->pFileEa, pData->dwEaSize);
     SetDlgItemText(hDlg, IDC_EXTENDED_ATTRIBUTES, szEaInfo);
 
     // Enable/disable transaction
@@ -357,7 +357,7 @@ static int OnRelativeFileHelp(HWND hDlg)
     int nLength = 0;
 
     // Load both parts of the message
-    nLength = LoadString(g_hInst, IDS_RELATIVE_FILE_HELP, szMsgFormat, _maxchars(szMsgFormat));
+    nLength = LoadString(g_hInst, IDS_RELATIVE_FILE_HELP, szMsgFormat, _countof(szMsgFormat));
     if(nLength > 0)
     {
         // Allocate big buffer for the entire text
@@ -474,7 +474,7 @@ static int OnEditEaClick(HWND hDlg)
     if(ExtendedAtributesEditorDialog(hDlg, pData) == IDOK)
     {
         // Update the info about extended attributes
-        rsprintf(szEaInfo, _maxchars(szEaInfo), IDS_EA_INFO, pData->pFileEa, pData->dwEaSize);
+        rsprintf(szEaInfo, _countof(szEaInfo), IDS_EA_INFO, pData->pFileEa, pData->dwEaSize);
         SetDlgItemText(hDlg, IDC_EXTENDED_ATTRIBUTES, szEaInfo);
     }
 
@@ -543,7 +543,7 @@ static int OnMakeDirectoryClick(HWND hDlg)
         Status = MyCreateDirectory(pData, &ObjAttr, &IoStatus);
     }
 
-    SetResultInfo(hDlg, Status, NULL, IoStatus.Information);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_NTCREATE, Status, &IoStatus);
     return TRUE;
 }
 
@@ -551,7 +551,7 @@ static int OnCreateFileClick(HWND hDlg)
 {
     TFileTestData * pData = GetDialogData(hDlg);
     OBJECT_ATTRIBUTES ObjAttr;
-    IO_STATUS_BLOCK IoStatus;
+    IO_STATUS_BLOCK IoStatus = {0};
     UNICODE_STRING FileName;
     UNICODE_STRING DirName;
     LARGE_INTEGER AllocationSize;
@@ -609,7 +609,7 @@ static int OnCreateFileClick(HWND hDlg)
 
         if(!NT_SUCCESS(Status))
         {
-            SetResultInfo(hDlg, Status, NULL, IoStatus.Information);
+            SetResultInfo(hDlg, RSI_NTSTATUS | RSI_HANDLE, Status, pData->hDirectory);
             return TRUE;
         }
     }
@@ -647,13 +647,13 @@ static int OnCreateFileClick(HWND hDlg)
                               &ObjAttr,
                               &IoStatus,
                               &AllocationSize,
-                               pData->dwFileAttributes,
+                               pData->dwFlagsAndAttributes,
                                pData->dwShareAccess,
                                pData->dwCreateDisposition2,
                                pData->dwCreateOptions,
                                pData->pFileEa,
                                pData->dwEaSize);
-        SetResultInfo(hDlg, Status, pData->hFile, IoStatus.Information);
+        SetResultInfo(hDlg, RSI_NTSTATUS | RSI_HANDLE | RSI_NTCREATE, Status, pData->hFile, &IoStatus);
 
         // If this operation failed, we close the directory as well
         if(!NT_SUCCESS(Status) && pData->hDirectory != NULL)
@@ -693,7 +693,7 @@ static int OnNtCloseClick(HWND hDlg)
         NtClose(pData->hDirectory);
     pData->hDirectory = NULL;
 
-    SetResultInfo(hDlg, Status, NULL, 0xFFFFFFFF);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_HANDLE, Status, pData->hFile);
     return TRUE;
 }
 

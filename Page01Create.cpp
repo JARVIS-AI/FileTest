@@ -69,15 +69,15 @@ static int SaveDialog(HWND hDlg)
     HWND hCombo = GetDlgItem(hDlg, IDC_CREATE_DISPOSITION);
     int nError = ERROR_SUCCESS;
 
-    GetDlgItemText(hDlg, IDC_DIRECTORY_NAME, pData->szDirName, _maxchars(pData->szDirName));
-    GetDlgItemText(hDlg, IDC_FILE_NAME, pData->szFileName1, _maxchars(pData->szFileName1));
-    GetDlgItemText(hDlg, IDC_TEMPLATE_FILE, pData->szTemplate, _maxchars(pData->szTemplate));
+    GetDlgItemText(hDlg, IDC_DIRECTORY_NAME, pData->szDirName, _countof(pData->szDirName));
+    GetDlgItemText(hDlg, IDC_FILE_NAME, pData->szFileName1, _countof(pData->szFileName1));
+    GetDlgItemText(hDlg, IDC_TEMPLATE_FILE, pData->szTemplate, _countof(pData->szTemplate));
 
     if((nError = DlgText2Hex32(hDlg, IDC_DESIRED_ACCESS, &pData->dwDesiredAccess)) != ERROR_SUCCESS)
         return nError;
     if((nError = DlgText2Hex32(hDlg, IDC_SHARE_ACCESS, &pData->dwShareAccess)) != ERROR_SUCCESS)
         return nError;
-    if((nError = DlgText2Hex32(hDlg, IDC_FILE_ATTRIBUTES, &pData->dwFileAttributes)) != ERROR_SUCCESS)
+    if((nError = DlgText2Hex32(hDlg, IDC_FILE_ATTRIBUTES, &pData->dwFlagsAndAttributes)) != ERROR_SUCCESS)
         return nError;
 
     pData->dwCreateDisposition1 = ComboBox_GetCurSel(hCombo) + 1;
@@ -85,10 +85,19 @@ static int SaveDialog(HWND hDlg)
     return ERROR_SUCCESS;
 }
 
-static int MyCreateDirectory(TFileTestData * pData, LPCTSTR szDirectory)
+static DWORD MyCreateDirectory(TFileTestData * pData, LPCTSTR szDirectory, size_t nLength = MAX_NT_PATH)
 {
-    int nError = ERROR_SUCCESS;
+    DWORD dwErrCode = ERROR_SUCCESS;
+    TCHAR szCutName[MAX_NT_PATH];
 
+    // Prepare shorter version of the directory name
+    if(nLength < MAX_NT_PATH)
+    {
+        StringCchCopyN(szCutName, _countof(szCutName), szDirectory, nLength);
+        szDirectory = szCutName;
+    }
+
+    // Create the directory, either normal or transacted
     if(pData->bUseTransaction)
     {
         // If the transacted version doesn't exist, do nothing
@@ -96,18 +105,15 @@ static int MyCreateDirectory(TFileTestData * pData, LPCTSTR szDirectory)
             return ERROR_NOT_SUPPORTED;
 
         if(!pfnCreateDirectoryTransacted(NULL, szDirectory, NULL, pData->hTransaction))
-            nError = GetLastError();
+            dwErrCode = GetLastError();
     }
     else
     {
         if(!CreateDirectory(szDirectory, NULL))
-            nError = GetLastError();
+            dwErrCode = GetLastError();
     }
 
-    // If the directory already exists, take it as success
-    if(nError == ERROR_ALREADY_EXISTS)
-        nError = ERROR_SUCCESS;
-    return nError;
+    return dwErrCode;
 }
 
 //-----------------------------------------------------------------------------
@@ -152,8 +158,8 @@ static int OnInitDialog(HWND hDlg, LPARAM lParam)
         pAnchors->AddAnchor(hDlg, IDC_CREATE_FILE, akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_CLOSE_HANDLE, akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_RESULT_FRAME, akLeft | akRight | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_LAST_ERROR_TITLE, akLeft | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_LAST_ERROR, akLeft | akRight | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE_TITLE, akLeft | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE, akLeft | akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_HANDLE_TITLE, akLeft | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_HANDLE, akLeft | akRight | akBottom);
     }
@@ -197,7 +203,7 @@ static int OnSetActive(HWND hDlg)
 
     // Set the various create options
     Hex2DlgText32(hDlg, IDC_DESIRED_ACCESS, pData->dwDesiredAccess);
-    Hex2DlgText32(hDlg, IDC_FILE_ATTRIBUTES, pData->dwFileAttributes);
+    Hex2DlgText32(hDlg, IDC_FILE_ATTRIBUTES, pData->dwFlagsAndAttributes);
     Hex2DlgText32(hDlg, IDC_SHARE_ACCESS, pData->dwShareAccess);
 
     // Enable/disable transaction
@@ -282,15 +288,16 @@ static int OnVirtualization(HWND hDlg)
 static int OnMakeDirectoryClick(HWND hDlg)
 {
     TFileTestData * pData = GetDialogData(hDlg);
+    LPTSTR szDirectoryEnd;
     LPTSTR szDirectory = pData->szDirName;
     LPTSTR szPathPart = pData->szDirName;
     LPTSTR szTemp;
-    TCHAR chSaveChar;
-    int nError = ERROR_SUCCESS;
+    DWORD dwErrCode = ERROR_SUCCESS;
 
     // Get the values from dialog controls to the dialog data
     if(SaveDialog(hDlg) != ERROR_SUCCESS)
         return FALSE;
+    szDirectoryEnd = pData->szDirName + _tcslen(pData->szDirName);
 
     // Now parse the directory as-is, create every sub-directory
     if(szDirectory[0] != 0)
@@ -299,34 +306,29 @@ static int OnMakeDirectoryClick(HWND hDlg)
         szPathPart = FindDirectoryPathPart(szDirectory);
         if(szPathPart != NULL)
         {
-            while(szPathPart[0] != 0)
+            while(dwErrCode == ERROR_SUCCESS && szPathPart[0] != 0)
             {
                 // Find either next backslash or end of string
                 szTemp = FindNextPathSeparator(szPathPart);
+                szPathPart = szTemp + 1;
                 
-                // Create the directory part
-                chSaveChar = szTemp[0];
-                szTemp[0] = 0;
-                nError = MyCreateDirectory(pData, szDirectory);
-                if(nError != ERROR_SUCCESS)
-                    break;
-
-                // Go to the next part of the path
-                szPathPart = szTemp;
-                szTemp[0] = chSaveChar;
+                // Attempt to create the directory. For parent directories, allow ERROR_ALREADY_EXISTS
+                dwErrCode = MyCreateDirectory(pData, szDirectory, (szTemp - szDirectory));
+                if(dwErrCode == ERROR_ALREADY_EXISTS && szTemp < szDirectoryEnd)
+                    dwErrCode = ERROR_SUCCESS;
             }
         }
         else
         {
-            nError = MyCreateDirectory(pData, szDirectory);
+            dwErrCode = MyCreateDirectory(pData, szDirectory);
         }
     }
     else
     {
-        nError = MyCreateDirectory(pData, szDirectory);
+        dwErrCode = MyCreateDirectory(pData, szDirectory);
     }
 
-    SetResultInfo(hDlg, nError, pData->hFile);
+    SetResultInfo(hDlg, RSI_LAST_ERROR | RSI_HANDLE, dwErrCode, pData->hFile);
     return TRUE;
 }
 
@@ -334,7 +336,7 @@ static int OnCreateFileClick(HWND hDlg)
 {
     TFileTestData * pData = GetDialogData(hDlg);
     HANDLE hTemplateFile = NULL;
-    int nError = ERROR_SUCCESS;
+    DWORD dwErrCode = ERROR_SUCCESS;
 
     // Close the handle, if already open
     if(IsHandleValid(pData->hFile))
@@ -344,19 +346,18 @@ static int OnCreateFileClick(HWND hDlg)
     if(SaveDialog(hDlg) != ERROR_SUCCESS)
         return FALSE;
 
-    // Change the directory (If any)
+    // Change the directory (if any)
     if(pData->szDirName[0] != 0)
     {
         if(!SetCurrentDirectory(pData->szDirName))
         {
-            nError = GetLastError();
-            SetResultInfo(hDlg, nError, INVALID_HANDLE_VALUE);
+            SetResultInfo(hDlg, RSI_LAST_ERROR | RSI_HANDLE, GetLastError(), INVALID_HANDLE_VALUE);
             return TRUE;
         }
     }
 
     // Prepare the template file
-    if(nError == ERROR_SUCCESS && pData->szTemplate[0] != 0)
+    if(dwErrCode == ERROR_SUCCESS && pData->szTemplate[0] != 0)
     {
         hTemplateFile = CreateFile(pData->szTemplate,
                                    FILE_READ_EA,
@@ -366,11 +367,11 @@ static int OnCreateFileClick(HWND hDlg)
                                    0,
                                    NULL);
         if(hTemplateFile == INVALID_HANDLE_VALUE)
-            nError = GetLastError();
+            dwErrCode = GetLastError();
     }
 
     // Prepare the file open
-    if(nError == ERROR_SUCCESS)
+    if(dwErrCode == ERROR_SUCCESS)
     {
         if(pData->bUseTransaction == FALSE)
         {
@@ -385,7 +386,7 @@ static int OnCreateFileClick(HWND hDlg)
                                       pData->dwShareAccess,
                                       NULL,
                                       pData->dwCreateDisposition1,
-                                      pData->dwFileAttributes,
+                                      pData->dwFlagsAndAttributes,
                                       hTemplateFile);
         }
         else
@@ -401,7 +402,7 @@ static int OnCreateFileClick(HWND hDlg)
                                                    pData->dwShareAccess,
                                                    NULL,
                                                    pData->dwCreateDisposition1,
-                                                   pData->dwFileAttributes,
+                                                   pData->dwFlagsAndAttributes,
                                                    hTemplateFile,
                                                    pData->hTransaction,
                                                    NULL,
@@ -409,19 +410,19 @@ static int OnCreateFileClick(HWND hDlg)
         }
 
         if(IsHandleInvalid(pData->hFile))
-            nError = GetLastError();
+            dwErrCode = GetLastError();
     }
 
     if(IsHandleValid(hTemplateFile))
         CloseHandle(hTemplateFile);
-    SetResultInfo(hDlg, nError, pData->hFile);
+    SetResultInfo(hDlg, RSI_LAST_ERROR | RSI_HANDLE, dwErrCode, pData->hFile);
     return TRUE;
 }
 
 static int OnCloseHandleClick(HWND hDlg)
 {
     TFileTestData * pData = GetDialogData(hDlg);
-    int nError = ERROR_SUCCESS;
+    DWORD dwErrCode = ERROR_SUCCESS;
 
     if(IsHandleValid(pData->hFile))
     {
@@ -436,11 +437,11 @@ static int OnCloseHandleClick(HWND hDlg)
         }
 
         if(!CloseHandle(pData->hFile))
-            nError = GetLastError();
+            dwErrCode = GetLastError();
+        pData->hFile = INVALID_HANDLE_VALUE;
     }
 
-    pData->hFile = NULL;
-    SetResultInfo(hDlg, nError, pData->hFile);
+    SetResultInfo(hDlg, RSI_LAST_ERROR | RSI_HANDLE, dwErrCode, pData->hFile);
     return TRUE;
 }
 

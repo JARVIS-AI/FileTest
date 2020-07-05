@@ -23,7 +23,7 @@ static void SetWindowModuleVersion(HWND hWndChild, LPCTSTR szModuleName)
     // Is such window really there ?
     if(hWndChild != NULL)
     {
-        GetWindowText(hWndChild, szFormat, _maxchars(szFormat));
+        GetWindowText(hWndChild, szFormat, _countof(szFormat));
         GetModuleVersion(szModuleName, &Version);
         StringCchPrintf(szText, _countof(szText), szFormat,
                                                   HIWORD(Version.HighPart),
@@ -112,11 +112,6 @@ INT_PTR HelpAboutDialog(HWND hParent)
 INT_PTR ObjectIDActionDialog(HWND hParent)
 {
     return DialogBox(g_hInst, MAKEINTRESOURCE(IDD_OBJECT_ID_MORE), hParent, DialogProc);
-}
-
-INT_PTR FileActionDialog(HWND hParent)
-{
-    return DialogBox(g_hInst, MAKEINTRESOURCE(IDD_FILE_ACTION), hParent, DialogProc);
 }
 
 INT_PTR ObjectGuidHelpDialog(HWND hParent)

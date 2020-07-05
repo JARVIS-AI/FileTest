@@ -28,16 +28,21 @@ static TFlagInfo ReparseTags[] =
 {
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_MOUNT_POINT),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_HSM),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_DRIVE_EXTENDER),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_HSM2),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_SIS),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_WIM),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_CSV),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_DFS),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_FILTER_MANAGER),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_SYMLINK),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_IIS_CACHE),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_DFSR),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_DEDUP),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_APPXSTRM),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_NFS),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_FILE_PLACEHOLDER),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_DFM),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_WOF),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_WCI),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_WCI_1),
@@ -58,13 +63,19 @@ static TFlagInfo ReparseTags[] =
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_CLOUD_D),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_CLOUD_E),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_CLOUD_F),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_CLOUD_MASK),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_APPEXECLINK),
-    FLAG_INFO_ENTRY(IO_REPARSE_TAG_GVFS),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_PROJFS),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_LX_SYMLINK),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_STORAGE_SYNC),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_WCI_TOMBSTONE),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_UNHANDLED),
     FLAG_INFO_ENTRY(IO_REPARSE_TAG_ONEDRIVE),
-    FLAG_INFO_ENTRY(IO_REPARSE_TAG_GVFS_TOMBSTONE),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_PROJFS_TOMBSTONE),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_AF_UNIX),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_LX_FIFO),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_LX_CHR),
+    FLAG_INFO_ENTRY(IO_REPARSE_TAG_LX_BLK),
     FLAG_INFO_END
 };
 
@@ -676,17 +687,17 @@ static int OnInitDialog(HWND hDlg, LPARAM lParam)
         pAnchors->AddAnchor(hDlg, IDC_REPARSE_QUERY, akLeftCenter | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_REPARSE_DELETE, akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_RESULT_FRAME, akLeft | akRight | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_RESULT_STATUS_TITLE, akLeft | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_RESULT_STATUS, akLeft | akRight | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_IOSTATUS_INFO_TITLE, akLeft | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_IOSTATUS_INFO, akLeft | akRight | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE_TITLE, akLeft | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE, akLeft | akRight | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_INFORMATION_TITLE, akLeft | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_INFORMATION, akLeft | akRight | akBottom);
     }
 
     // We need this in order to create symbolic link
     EnablePrivilege(_T("SeCreateSymbolicLinkPrivilege"));
 
     // Congigure the right-arrow image 
-    AttachIconToEdit(hDlg, GetDlgItem(hDlg, IDC_SYMLINK_TARGET), IDI_RIGHT_ARROW);
+    AttachIconToEdit(hDlg, GetDlgItem(hDlg, IDC_SYMLINK_TARGET), MAKEINTRESOURCE(IDI_RIGHT_ARROW));
 
     // Default number of characters for combo box's edit field is 46.
     // We have to increase it.
@@ -773,7 +784,7 @@ static int OnBeginLabelEdit(HWND hDlg, LPNMTVDISPINFO pNMDispInfo)
 
     // By default, the item is not editable
     if(bStartEditing == FALSE)
-        SetResultInfo(hDlg, STATUS_CANNOT_EDIT_THIS);
+        SetResultInfo(hDlg, RSI_NTSTATUS, STATUS_CANNOT_EDIT_THIS);
 
     // Setup the close dialog and start editing (or not)
     DisableCloseDialog(hDlg, bStartEditing);
@@ -877,8 +888,8 @@ static int OnSymlinkCreate(HWND hDlg)
     TCHAR szTargetName[MAX_PATH];
 
     // Get the name of the symbolic link
-    GetDlgItemText(hDlg, IDC_SYMLINK, szSymlinkName, _maxchars(szSymlinkName));
-    GetDlgItemText(hDlg, IDC_SYMLINK_TARGET, szTargetName, _maxchars(szTargetName));
+    GetDlgItemText(hDlg, IDC_SYMLINK, szSymlinkName, _countof(szSymlinkName));
+    GetDlgItemText(hDlg, IDC_SYMLINK_TARGET, szTargetName, _countof(szTargetName));
 
     // Query the symbolic link
     InitializeObjectAttributes(&ObjAttr,
@@ -899,7 +910,7 @@ static int OnSymlinkCreate(HWND hDlg)
         EnableDlgItems(hDlg, TRUE, IDC_SYMLINK_DELETE, 0);
     }
 
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_NOINFO, Status);
     return TRUE;
 }
 
@@ -914,7 +925,7 @@ static int OnSymlinkQuery(HWND hDlg)
     ULONG Length = 0;
 
     // Get the name of the symbolic link
-    GetDlgItemText(hDlg, IDC_SYMLINK, szSymlinkName, _maxchars(szSymlinkName));
+    GetDlgItemText(hDlg, IDC_SYMLINK, szSymlinkName, _countof(szSymlinkName));
 
     // Query the symbolic link
     InitializeObjectAttributes(&ObjAttr, &SymlinkName, OBJ_CASE_INSENSITIVE, NULL, NULL);
@@ -943,18 +954,19 @@ static int OnSymlinkQuery(HWND hDlg)
         NtClose(Handle);
     }
 
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFO_INT32, Status, Length);
     return TRUE;
 }
 
 static int OnSymlinkDelete(HWND hDlg)
 {
     TFileTestData * pData = GetDialogData(hDlg);
+    NTSTATUS Status;
 
-    if(IsHandleValid(pData->hSymLink))
-        NtClose(pData->hSymLink);
+    Status = NtClose(pData->hSymLink);
     pData->hSymLink = NULL;
 
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_NOINFO, Status);
     EnableDlgItems(hDlg, FALSE, IDC_SYMLINK_DELETE, 0);
     return TRUE;
 }
@@ -1095,7 +1107,7 @@ static void OnUpdateView(HWND hDlg)
 static int OnHardlinkCreate(HWND hDlg)
 {
     OBJECT_ATTRIBUTES ObjAttr;
-    IO_STATUS_BLOCK IoStatus;
+    IO_STATUS_BLOCK IoStatus = { 0 };
     UNICODE_STRING FileName;
     NTSTATUS Status = STATUS_SUCCESS;
     LPTSTR szPlainName;
@@ -1107,8 +1119,8 @@ static int OnHardlinkCreate(HWND hDlg)
     BYTE LinkInfoBuff[0x500];
 
     // Get the name of the symbolic link
-    GetDlgItemText(hDlg, IDC_HARDLINK_LIST, szFileName, _maxchars(szFileName));
-    GetDlgItemText(hDlg, IDC_NEW_HARDLINK, szHardlinkName, _maxchars(szHardlinkName));
+    GetDlgItemText(hDlg, IDC_HARDLINK_LIST, szFileName, _countof(szFileName));
+    GetDlgItemText(hDlg, IDC_NEW_HARDLINK, szHardlinkName, _countof(szHardlinkName));
 
     // Get the plain file name of the hardlink
     szPlainName = _tcsrchr(szHardlinkName, _T('\\'));
@@ -1177,7 +1189,7 @@ static int OnHardlinkCreate(HWND hDlg)
 
     if(hDirectory != NULL)
         NtClose(hDirectory);
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
@@ -1187,7 +1199,7 @@ static int OnHardlinkQuery(HWND hDlg)
     PFILE_LINK_ENTRY_INFORMATION pLinkInfo = NULL;
     PFILE_LINKS_INFORMATION pLinksInfo = NULL;
     OBJECT_ATTRIBUTES ObjAttr;
-    IO_STATUS_BLOCK IoStatus;
+    IO_STATUS_BLOCK IoStatus = { 0 };
     UNICODE_STRING FileName;
     NTSTATUS Status = STATUS_SUCCESS;
     LPTSTR szHardLinkName;
@@ -1198,7 +1210,7 @@ static int OnHardlinkQuery(HWND hDlg)
     HWND hCombo = GetDlgItem(hDlg, IDC_HARDLINK_LIST);
 
     // Get the name of the symbolic link
-    GetDlgItemText(hDlg, IDC_HARDLINK_LIST, szFileName, _maxchars(szFileName));
+    GetDlgItemText(hDlg, IDC_HARDLINK_LIST, szFileName, _countof(szFileName));
 
     // Open the hardlink as if it was file
     InitializeObjectAttributes(&ObjAttr, &FileName, OBJ_CASE_INSENSITIVE, NULL, NULL);
@@ -1278,7 +1290,7 @@ static int OnHardlinkQuery(HWND hDlg)
     // Open the drop list to show all links
     if(HardLinkCount != 0)
         PostMessage(hDlg, WM_SHOW_HARDLINKS, 0, 0);
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
@@ -1290,7 +1302,7 @@ static int OnHardlinkDelete(HWND hDlg)
     TCHAR szHardlinkName[MAX_PATH];
 
     // Get the name of the symbolic link
-    GetDlgItemText(hDlg, IDC_HARDLINK_LIST, szHardlinkName, _maxchars(szHardlinkName));
+    GetDlgItemText(hDlg, IDC_HARDLINK_LIST, szHardlinkName, _countof(szHardlinkName));
 
     // Open the symlink and delete it
     InitializeObjectAttributes(&ObjAttr, &FileName, OBJ_CASE_INSENSITIVE, NULL, NULL);
@@ -1301,7 +1313,7 @@ static int OnHardlinkDelete(HWND hDlg)
         FreeFileNameString(&FileName);
     }
 
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_NOINFO, Status);
     return TRUE;
 }
 
@@ -1310,7 +1322,7 @@ static int OnReparseCreate(HWND hDlg)
     PREPARSE_DATA_BUFFER ReparseData;
     TFileTestData * pData = GetDialogData(hDlg);
     OBJECT_ATTRIBUTES ObjAttr;
-    IO_STATUS_BLOCK IoStatus;
+    IO_STATUS_BLOCK IoStatus = { 0 };
     UNICODE_STRING FileName;
     NTSTATUS Status;
     HANDLE hReparse = NULL;
@@ -1318,7 +1330,7 @@ static int OnReparseCreate(HWND hDlg)
     ULONG CreateOptions = FILE_SYNCHRONOUS_IO_ALERT | FILE_OPEN_REPARSE_POINT;
 
     // Get the name of the reparse point
-    GetDlgItemText(hDlg, IDC_REPARSE, szReparseName, _maxchars(szReparseName));
+    GetDlgItemText(hDlg, IDC_REPARSE, szReparseName, _countof(szReparseName));
     ReparseData = pData->ReparseData;
 
     // Prepare the name of the reparse point
@@ -1362,7 +1374,7 @@ static int OnReparseCreate(HWND hDlg)
         FreeFileNameString(&FileName);
     }
 
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
@@ -1378,7 +1390,7 @@ static int OnReparseQuery(HWND hDlg)
     TCHAR szReparseName[MAX_PATH];
 
     // Get the name of the reparse point
-    GetDlgItemText(hDlg, IDC_REPARSE, szReparseName, _maxchars(szReparseName));
+    GetDlgItemText(hDlg, IDC_REPARSE, szReparseName, _countof(szReparseName));
     ReparseData = pData->ReparseData;
 
     // Open the reparse point
@@ -1424,7 +1436,7 @@ static int OnReparseQuery(HWND hDlg)
     }
 
     // Show the result to the dialog
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
@@ -1436,7 +1448,7 @@ static int OnReparseDelete(HWND hDlg)
     TCHAR szReparseName[MAX_PATH];
 
     // Get the name of the reparse point
-    GetDlgItemText(hDlg, IDC_REPARSE, szReparseName, _maxchars(szReparseName));
+    GetDlgItemText(hDlg, IDC_REPARSE, szReparseName, _countof(szReparseName));
 
     // Open the reparse point
     Status = FileNameToUnicodeString(&FileName, szReparseName);
@@ -1447,7 +1459,7 @@ static int OnReparseDelete(HWND hDlg)
         FreeFileNameString(&FileName);
     }
 
-    SetResultInfo(hDlg, Status);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_NOINFO, Status);
     return TRUE;
 }
 

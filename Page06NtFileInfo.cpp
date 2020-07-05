@@ -12,10 +12,12 @@
 #include "resource.h"
 
 //-----------------------------------------------------------------------------
-// Local structures
+// Local defines
 
 #define WM_RELOADITEMS       (WM_USER + 0x1000)
 #define WM_SHOW_DATE_FORMATS (WM_USER + 0x1001)
+
+#define INITIAL_FILEINFO_BUFFER_SIZE 0x10000
 
 static UNICODE_STRING NullString = RTL_CONSTANT_STRING(L"NULL");
 
@@ -616,7 +618,7 @@ TStructMember FileVolumeNameInformationMembers[] =
 
 TStructMember FileIdInformationMembers[] =
 {
-    {_T("VolumeSerialNumber"), TYPE_UINT64,     sizeof(ULONG)},
+    {_T("VolumeSerialNumber"), TYPE_UINT64,     sizeof(LARGE_INTEGER)},
     {_T("FileId"),             TYPE_FILEID128,  sizeof(FILE_ID_128)},
     {NULL, TYPE_NONE, 0}
 };
@@ -763,12 +765,40 @@ TStructMember FileCaseSensitiveInformationMembers[] =
     { NULL, TYPE_NONE, 0 }
 };
 
+TFlagInfo FileLinkInformationExValues[] =
+{
+	FLAG_INFO_ENTRY(FILE_LINK_REPLACE_IF_EXISTS),
+	FLAG_INFO_ENTRY(FILE_LINK_POSIX_SEMANTICS),
+	FLAG_INFO_ENTRY(FILE_LINK_SUPPRESS_STORAGE_RESERVE_INHERITANCE),
+	FLAG_INFO_ENTRY(FILE_LINK_NO_INCREASE_AVAILABLE_SPACE),
+	FLAG_INFO_ENTRY(FILE_LINK_NO_DECREASE_AVAILABLE_SPACE),
+	FLAG_INFO_ENTRY(FILE_LINK_PRESERVE_AVAILABLE_SPACE),
+	FLAG_INFO_ENTRY(FILE_LINK_IGNORE_READONLY_ATTRIBUTE),
+	FLAG_INFO_END
+};
+
+
+TStructMember FileLinkInformationExMembers[] =
+{
+    {_T("Flags"),          TYPE_FLAG32,	    sizeof(ULONG), NULL, {(TStructMember *)FileLinkInformationExValues}},
+	{_T("<padding>"),      TYPE_PADDING,    sizeof(HANDLE) },
+    {_T("RootDirectory"),  TYPE_DIR_HANDLE, sizeof(HANDLE)},
+    {_T("FileNameLength"), TYPE_UINT32,     sizeof(ULONG)},
+    {_T("FileName"),       TYPE_WNAME_L32B, FIELD_OFFSET(FILE_LINK_INFORMATION, FileNameLength)},
+    {NULL, TYPE_NONE, 0}
+};
+
 #define FileAttributeCacheInformationMembers            FileUnknownInformationMembers
 #define FileRenameInformationBypassAccessCheckMembers   FileRenameInformationMembers
-#define FileLinkInformationBypassAccessCheckMembers     FileLinkInformationMembers
+#define FileLinkInformationBypassAccessCheckMembers     FileLinkInformationExMembers
 #define FileReplaceCompletionInformationMembers         FileCompletionInformationMembers
 #define FileRenameInformationExMembers                  FileRenameInformationExMembers
 #define FileRenameInformationExBypassAccessCheckMembers FileRenameInformationExMembers
+#define FileCaseSensitiveInformationBypassAccessCheckMembers FileCaseSensitiveInformationMembers
+#define FileLinkInformationExBypassAccessCheckMembers   FileLinkInformationExMembers
+#define FileStorageReserveIdInformationMembers          FileUnknownInformationMembers
+#define FileStorageReserveIdInformationMembers          FileUnknownInformationMembers
+#define FileCaseSensitiveInformationForceAccessCheckMembers  FileCaseSensitiveInformationMembers
 
 TInfoData FileInfoData[] =                                                  
 {
@@ -843,6 +873,11 @@ TInfoData FileInfoData[] =
     FILE_INFO_READONLY(FileMemoryPartitionInformation,          FILE_MEMORY_PARTITION_INFORMATION,           FALSE),
     FILE_INFO_READONLY(FileStatLxInformation,                   FILE_STAT_LX_INFORMATION,                    FALSE),
     FILE_INFO_EDITABLE(FileCaseSensitiveInformation,            FILE_CASE_SENSITIVE_INFORMATION,             FALSE),
+
+    FILE_INFO_EDITABLE(FileLinkInformationEx,                   FILE_LINK_INFORMATION_EX,                    FALSE),
+    FILE_INFO_EDITABLE(FileLinkInformationExBypassAccessCheck,  FILE_LINK_INFORMATION_EX,                    FALSE),
+    FILE_INFO_READONLY(FileStorageReserveIdInformation,         FILE_CASE_SENSITIVE_INFORMATION,             FALSE),
+    FILE_INFO_EDITABLE(FileCaseSensitiveInformationForceAccessCheck, FILE_CASE_SENSITIVE_INFORMATION,       FALSE),
 
     {FileMaximumInformation}                                                                                 
 };
@@ -1369,8 +1404,15 @@ static int DataToItemText(TStructMember * pMember, LPTSTR szBuffer, size_t nMaxC
             break;
         }
 
-        case TYPE_ARRAY8_FIXED:
         case TYPE_FILEID128:
+        {
+            PLARGE_INTEGER pliValue = (PLARGE_INTEGER)pMember->pbDataPtr;
+
+            StringCchPrintfEx(szBuffer, (szEndChar - szBuffer), &szBuffer, NULL, 0, _T("%016I64X-%016I64X"), pliValue[1].QuadPart, pliValue[0].QuadPart);
+            break;
+        }
+
+        case TYPE_ARRAY8_FIXED:
         {
             LPBYTE pbData = (LPBYTE)pMember->pbDataPtr;
 
@@ -1732,7 +1774,7 @@ static int InsertTreeItemFlags32(
         pMemberInfo->pFlags       = pMember->pFlags;
 
         // Insert the tree item to the tree
-        if(DataToItemText(pMemberInfo, szItemText, _maxchars(szItemText), FALSE) == ERROR_SUCCESS)
+        if(DataToItemText(pMemberInfo, szItemText, _countof(szItemText), FALSE) == ERROR_SUCCESS)
             InsertTreeItem(hTreeView, hParentItem, szItemText, pMemberInfo);
     }
 
@@ -1817,7 +1859,7 @@ static int InsertTreeItemByDataType(
                 pMemberInfo->pbDataPtr    = pbDataPtr;
 
                 // Get the item text
-                if(DataToItemText(pMemberInfo, szItemText, _maxchars(szItemText), FALSE) == ERROR_SUCCESS)
+                if(DataToItemText(pMemberInfo, szItemText, _countof(szItemText), FALSE) == ERROR_SUCCESS)
                     InsertTreeItem(hTreeView, hParentItem, szItemText, pMemberInfo);
             }
 
@@ -1840,7 +1882,7 @@ static int InsertTreeItemByDataType(
             pMemberInfo->pbDataPtr    = pbDataPtr;
 
             // Get the item text
-            if(DataToItemText(pMemberInfo, szItemText, _maxchars(szItemText), FALSE) == ERROR_SUCCESS)
+            if(DataToItemText(pMemberInfo, szItemText, _countof(szItemText), FALSE) == ERROR_SUCCESS)
                 InsertTreeItem(hTreeView, hParentItem, szItemText, pMemberInfo);
         }
     }
@@ -1932,7 +1974,7 @@ static int ReloadTreeViewItems(HWND hDlg, HWND hTreeView, HTREEITEM hParentItem)
         if(pMemberInfo != NULL)
         {
             // Get the item text
-            if(DataToItemText(pMemberInfo, szItemText, _maxchars(szItemText), FALSE) == ERROR_SUCCESS)
+            if(DataToItemText(pMemberInfo, szItemText, _countof(szItemText), FALSE) == ERROR_SUCCESS)
             {
                 ZeroMemory(&tvi, sizeof(TVITEM));
                 tvi.mask    = TVIF_TEXT;
@@ -2104,7 +2146,7 @@ static size_t FillDialogWithFileInfo(HWND hDlg, TInfoData * pInfoData, int nInfo
 {
     TFileTestData * pData = GetDialogData(hDlg);
     HTREEITEM hRootItem = NULL;
-    LPBYTE pbNtInfoBuffEnd = pData->pbNtInfoBuff + pData->cbNtInfoBuff;
+    LPBYTE pbNtInfoBuffEnd = pData->NtInfoData.pbData + pData->NtInfoData.cbData;
     HWND hTreeView = GetDlgItem(hDlg, IDC_FILE_INFO);
     HWND hComment = GetDlgItem(hDlg, IDC_COMMENT);
     size_t nInputLength = 0;
@@ -2134,7 +2176,7 @@ static size_t FillDialogWithFileInfo(HWND hDlg, TInfoData * pInfoData, int nInfo
                 nInputLength = FillStructureMembers(hTreeView,
                                                     hRootItem,
                                                     pInfoData->pStructMembers,
-                                                    pData->pbNtInfoBuff,
+                                                    pData->NtInfoData.pbData,
                                                     pbNtInfoBuffEnd);
             }
             else
@@ -2142,7 +2184,7 @@ static size_t FillDialogWithFileInfo(HWND hDlg, TInfoData * pInfoData, int nInfo
                 nInputLength = FillChainedStructMembers(hTreeView, 
                                                         hRootItem,
                                                         pInfoData->pStructMembers,
-                                                        pData->pbNtInfoBuff,
+                                                        pData->NtInfoData.pbData,
                                                         pbNtInfoBuffEnd);
             }
 
@@ -2345,11 +2387,14 @@ static int OnInitDialog(HWND hDlg, LPARAM lParam)
         pAnchors->AddAnchor(hDlg, IDC_QUERY_VOL_INFO, akLeft | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_SET_VOL_INFO, akRight | akBottom);
         pAnchors->AddAnchor(hDlg, IDC_RESULT_FRAME, akLeft | akRight | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_RESULT_STATUS_TITLE, akLeft | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_RESULT_STATUS, akLeft | akRight | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_IOSTATUS_INFO_TITLE, akLeft | akBottom);
-        pAnchors->AddAnchor(hDlg, IDC_IOSTATUS_INFO, akLeft | akRight | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE_TITLE, akLeft | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_ERROR_CODE, akLeft | akRight | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_INFORMATION_TITLE, akLeft | akBottom);
+        pAnchors->AddAnchor(hDlg, IDC_INFORMATION, akLeft | akRight | akBottom);
     }
+
+    // Allocate default size for the FileInfo.
+    pData->NtInfoData.SetLength(INITIAL_FILEINFO_BUFFER_SIZE);
 
     // Fill the combo box with names of file information classes
     hWndChild = GetDlgItem(hDlg, IDC_FILE_INFO_CLASS);
@@ -2385,7 +2430,7 @@ static int OnInitDialog(HWND hDlg, LPARAM lParam)
         FillDialogWithMasks(hWndChild);
 
     // Initialize the in/out data length
-    Hex2DlgText32(hDlg, IDC_INPUT_LENGTH, pData->cbNtInfoBuff);
+    Hex2DlgText32(hDlg, IDC_INPUT_LENGTH, (DWORD)(pData->NtInfoData.cbData));
 
     // Configure the buttons
     EnableOrDisableButtons(hDlg);
@@ -2431,9 +2476,9 @@ static int OnShowDateFormats(HWND hDlg, HWND hTreeItem, HTREEITEM hItem)
         return TRUE;
   
     // Prepare the text for the tooltip
-    LoadString(g_hInst, IDS_BAD_DATETIME_FORMAT, szTitle, _maxchars(szTitle));
-    LoadString(g_hInst, IDS_DATE_FORMAT_PREFIX, szDateFormatPrefix, _maxchars(szDateFormatPrefix));
-    LoadString(g_hInst, IDS_TIME_FORMAT_PREFIX, szTimeFormatPrefix, _maxchars(szTimeFormatPrefix));
+    LoadString(g_hInst, IDS_BAD_DATETIME_FORMAT, szTitle, _countof(szTitle));
+    LoadString(g_hInst, IDS_DATE_FORMAT_PREFIX, szDateFormatPrefix, _countof(szDateFormatPrefix));
+    LoadString(g_hInst, IDS_TIME_FORMAT_PREFIX, szTimeFormatPrefix, _countof(szTimeFormatPrefix));
     GetSupportedDateTimeFormats(szDateFormatPrefix, szTimeFormatPrefix, szText, nMaxChars);
 
     // Create the additional tooltip window
@@ -2532,7 +2577,7 @@ static int OnBeginLabelEdit(HWND hDlg, NMTVDISPINFO * pTVDispInfo)
             CantEditStatus = STATUS_COPIED_TO_CLIPBOARD;
         }
 
-        SetResultInfo(hDlg, CantEditStatus);
+        SetResultInfo(hDlg, RSI_NTSTATUS | RSI_NOINFO, CantEditStatus);
         SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
         return TRUE;
     }
@@ -2545,7 +2590,7 @@ static int OnBeginLabelEdit(HWND hDlg, NMTVDISPINFO * pTVDispInfo)
         if(hEdit != NULL)
         {
             // Get the item text
-            if(DataToItemText(pMemberInfo, szItemText, _maxchars(szItemText), TRUE) == ERROR_SUCCESS)
+            if(DataToItemText(pMemberInfo, szItemText, _countof(szItemText), TRUE) == ERROR_SUCCESS)
             {
                 SetWindowText(hEdit, szItemText);
                 bStartEditing = TRUE;
@@ -2593,7 +2638,7 @@ static int OnEndLabelEdit(HWND hDlg, NMTVDISPINFO * pTVDispInfo)
 
             // We should warn the user about that the item
             // has invalid format for its data type
-            SetResultInfo(hDlg, Status);
+            SetResultInfo(hDlg, RSI_NTSTATUS | RSI_NOINFO, Status);
         }
     }
 
@@ -2768,9 +2813,9 @@ static int OnComboBoxItemSelected(HWND hDlg, UINT nID, TInfoData * pInfoData)
     pInfoData = GetSelectedInfoClass(hDlg, nID, pInfoData);
     if(pInfoData != NULL)
     {
-        ZeroMemory(pData->pbNtInfoBuff, pData->cbNtInfoBuff);
+        ZeroMemory(pData->NtInfoData.pbData, pData->NtInfoData.cbData);
         FillDialogWithFileInfo(hDlg, pInfoData, 1);
-        Hex2DlgText32(hDlg, IDC_INPUT_LENGTH, pData->cbNtInfoBuff);
+        Hex2DlgText32(hDlg, IDC_INPUT_LENGTH, (DWORD)(pData->NtInfoData.cbData));
     }
 
     return TRUE;
@@ -2778,6 +2823,7 @@ static int OnComboBoxItemSelected(HWND hDlg, UINT nID, TInfoData * pInfoData)
 
 static int OnDefaultLengthClick(HWND hDlg)
 {
+    TFileTestData * pData = GetDialogData(hDlg);
     TInfoData * pInfoData;
     UINT nDataLength = 0;
 
@@ -2791,6 +2837,7 @@ static int OnDefaultLengthClick(HWND hDlg)
     if(pInfoData != NULL)
         nDataLength = GetStructLength(pInfoData->pStructMembers);
 
+    pData->NtInfoData.SetLength(nDataLength);
     Hex2DlgText32(hDlg, IDC_INPUT_LENGTH, nDataLength);
     return TRUE;
 }
@@ -2799,7 +2846,8 @@ static int OnMaximumLengthClick(HWND hDlg)
 {
     TFileTestData * pData = GetDialogData(hDlg);
 
-    Hex2DlgText32(hDlg, IDC_INPUT_LENGTH, pData->cbNtInfoBuff);
+    pData->NtInfoData.SetLength(pData->NtInfoData.cbDataMax);
+    Hex2DlgText32(hDlg, IDC_INPUT_LENGTH, (DWORD)(pData->NtInfoData.cbDataMax));
     return TRUE;
 }
 
@@ -2828,20 +2876,14 @@ static int OnQueryInfoClick(HWND hDlg)
     DlgText2Hex32(hDlg, IDC_INPUT_LENGTH, &Length);
     
     // If the required length is bigger than the current one, reallocate the buffer
-    if(Length > pData->cbNtInfoBuff) 
-    {
-        if(pData->pbNtInfoBuff != NULL)
-            HeapFree(g_hHeap, 0, pData->pbNtInfoBuff);
-        pData->pbNtInfoBuff = (LPBYTE)HeapAlloc(g_hHeap, HEAP_ZERO_MEMORY, Length);
-        pData->cbNtInfoBuff = Length;
-    }
+    pData->NtInfoData.SetLength(Length);
 
     // Perform the call
     if(NT_SUCCESS(Status))
     {
         Status = NtQueryInformationFile(pData->hFile,
                                         &IoStatus,
-                                        pData->pbNtInfoBuff,
+                                        pData->NtInfoData.pbData,
                                         Length,
                                         FileInfoClass);
     }                                        
@@ -2851,7 +2893,7 @@ static int OnQueryInfoClick(HWND hDlg)
         FillDialogWithFileInfo(hDlg, FileInfoData, (int)FileInfoClass);
 
     // Set the result status and return
-    SetResultInfo(hDlg, Status, NULL, IoStatus.Information);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
@@ -2886,13 +2928,7 @@ static int OnQueryDirClick(HWND hDlg)
     DlgText2Hex32(hDlg, IDC_INPUT_LENGTH, &Length);
 
     // If the required length is bigger than the current one, reallocate the buffer
-    if(Length > pData->cbNtInfoBuff) 
-    {
-        if(pData->pbNtInfoBuff != NULL)
-            HeapFree(g_hHeap, 0, pData->pbNtInfoBuff);
-        pData->pbNtInfoBuff = (LPBYTE)HeapAlloc(g_hHeap, HEAP_ZERO_MEMORY, Length);
-        pData->cbNtInfoBuff = Length;
-    }
+    pData->NtInfoData.SetLength(Length);
 
     // Perform the call
     if(NT_SUCCESS(Status))
@@ -2909,7 +2945,7 @@ static int OnQueryDirClick(HWND hDlg)
                                       NULL,
                                       NULL,
                                      &IoStatus,
-                                      pData->pbNtInfoBuff,
+                                      pData->NtInfoData.pbData,
                                       Length, 
                                       FileInfoClass,
                                       FALSE,
@@ -2927,7 +2963,7 @@ static int OnQueryDirClick(HWND hDlg)
     // If succeeded, we have to fill the dialog with file info
     if(NT_SUCCESS(Status) || Status == STATUS_BUFFER_OVERFLOW)
         FillDialogWithFileInfo(hDlg, FileInfoData, (int)FileInfoClass);
-    SetResultInfo(hDlg, Status, NULL, IoStatus.Information);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
 
     // Set the result status and return
     if(hEvent != NULL)
@@ -2944,8 +2980,6 @@ static int OnSetInfoClick(HWND hDlg)
     IO_STATUS_BLOCK IoStatus = {0};
     TInfoData * pInfoData;
     NTSTATUS Status = STATUS_SUCCESS;
-    LPBYTE pbNtInfoBuff = pData->pbNtInfoBuff;
-    ULONG cbNtInfoBuff = pData->cbNtInfoBuff;
     ULONG Length = 0;
 
     // Test if the handle is an NT file handle and get the file info class
@@ -2964,31 +2998,20 @@ static int OnSetInfoClick(HWND hDlg)
     DlgText2Hex32(hDlg, IDC_INPUT_LENGTH, &Length);
 
     // If the required length is bigger than the current one, reallocate the buffer
-    if(Length > pData->cbNtInfoBuff) 
-    {
-        // Allocate new buffer
-        pData->pbNtInfoBuff = (LPBYTE)HeapAlloc(g_hHeap, HEAP_ZERO_MEMORY, Length);
-        pData->cbNtInfoBuff = Length;
-
-        // Copy old buffer to the new one
-        if(pData->pbNtInfoBuff != NULL && pbNtInfoBuff != NULL)
-            memcpy(pData->pbNtInfoBuff, pbNtInfoBuff, cbNtInfoBuff);
-        if(pbNtInfoBuff != NULL)
-            HeapFree(g_hHeap, 0, pbNtInfoBuff);
-    }
+    pData->NtInfoData.SetLength(Length);
 
     // Call NtSetInformationFile
     if(NT_SUCCESS(Status))
     {
         Status = NtSetInformationFile(pData->hFile,
                                      &IoStatus,
-                                      pData->pbNtInfoBuff,
+                                      pData->NtInfoData.pbData,
                                       Length,
                                       FileInfoClass);
     }                                        
 
     // Set the result status and return
-    SetResultInfo(hDlg, Status, NULL, IoStatus.Information);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
@@ -3017,20 +3040,14 @@ static int OnQueryFsInfoClick(HWND hDlg)
     DlgText2Hex32(hDlg, IDC_INPUT_LENGTH, &Length);
 
     // If the required length is bigger than the current one, reallocate the buffer
-    if(Length > pData->cbNtInfoBuff) 
-    {
-        if(pData->pbNtInfoBuff != NULL)
-            HeapFree(g_hHeap, 0, pData->pbNtInfoBuff);
-        pData->pbNtInfoBuff = (LPBYTE)HeapAlloc(g_hHeap, HEAP_ZERO_MEMORY, Length);
-        pData->cbNtInfoBuff = Length;
-    }
+    pData->NtInfoData.SetLength(Length);
 
     // Perform the call
     if(NT_SUCCESS(Status))
     {
         Status = NtQueryVolumeInformationFile(pData->hFile,
                                              &IoStatus,
-                                              pData->pbNtInfoBuff,
+                                              pData->NtInfoData.pbData,
                                               Length,
                                               FsInfoClass);
     }                                        
@@ -3040,7 +3057,7 @@ static int OnQueryFsInfoClick(HWND hDlg)
         FillDialogWithFileInfo(hDlg, FsInfoData, (int)FsInfoClass);
 
     // Set the result status and return
-    SetResultInfo(hDlg, Status, NULL, IoStatus.Information);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
@@ -3069,26 +3086,20 @@ static int OnSetFsInfoClick(HWND hDlg)
     DlgText2Hex32(hDlg, IDC_INPUT_LENGTH, &Length);
 
     // If the required length is bigger than the current one, reallocate the buffer
-    if(Length > pData->cbNtInfoBuff) 
-    {
-        if(pData->pbNtInfoBuff != NULL)
-            HeapFree(g_hHeap, 0, pData->pbNtInfoBuff);
-        pData->pbNtInfoBuff = (LPBYTE)HeapAlloc(g_hHeap, HEAP_ZERO_MEMORY, Length);
-        pData->cbNtInfoBuff = Length;
-    }
+    pData->NtInfoData.SetLength(Length);
 
     // Call NtSetInformationFile
     if(NT_SUCCESS(Status))
     {
         Status = NtSetVolumeInformationFile(pData->hFile,
                                            &IoStatus,
-                                            pData->pbNtInfoBuff,
+                                            pData->NtInfoData.pbData,
                                             Length,
                                             FsInfoClass);
     }                                        
 
     // Set the result status and return
-    SetResultInfo(hDlg, Status, NULL, IoStatus.Information);
+    SetResultInfo(hDlg, RSI_NTSTATUS | RSI_INFORMATION, Status, &IoStatus);
     return TRUE;
 }
 
